@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
 import 'dart:async';
 import 'dart:math';
 import 'dart:convert';
@@ -161,8 +162,23 @@ class AppStorage {
   static const _kNoticeRowH    = 'notice_row_h';
   static const _kTableRowH     = 'table_row_h';
   static const _kDateFontSz    = 'date_font_size';
-  static const _kClockType     = 'clock_type';
-  static const _kBurnInInterval= 'burn_in_interval';
+  static const _kClockType      = 'clock_type';
+  static const _kBurnInInterval = 'burn_in_interval';
+  static const _kNoticeVersion  = 'notice_version';   // 온라인 유의사항 버전
+
+  // 온라인 유의사항 JSON URL (GitHub raw)
+  static const noticeRemoteUrl =
+      'https://raw.githubusercontent.com/yooonique/blackboard/main/assets/exam_notices.json';
+
+  static Future<int> loadNoticeVersion() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getInt(_kNoticeVersion) ?? 0;
+  }
+
+  static Future<void> saveNoticeVersion(int v) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setInt(_kNoticeVersion, v);
+  }
 
   static Future<void> saveAll(Map<String, dynamic> d) async {
     final p = await SharedPreferences.getInstance();
@@ -377,6 +393,10 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
   double _dateFontSize    = 22.0;
   bool _isLoading = true;
 
+  // 온라인 유의사항 갱신 상태
+  bool _noticeUpdateChecking = false;  // 확인 중 표시용
+  bool _noticeUpdated        = false;  // 갱신 완료 알림용
+
   // ─────────────────────────────────────────────
   @override
   void initState() {
@@ -387,6 +407,76 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
       if (mounted && _isDateAutomatic) setState(() {});
     });
     _resetBurnInTimer();
+    // 앱 시작 시 유의사항 최신 여부 온라인 확인 (로드 완료 후)
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkAndUpdateNotices());
+  }
+
+  // ── 온라인 유의사항 갱신 ──
+  Future<void> _checkAndUpdateNotices() async {
+    // 네트워크 타임아웃 5초, 실패 시 조용히 종료
+    try {
+      if (mounted) setState(() => _noticeUpdateChecking = true);
+
+      final response = await http.get(
+        Uri.parse(AppStorage.noticeRemoteUrl),
+      ).timeout(const Duration(seconds: 5));
+
+      if (response.statusCode != 200) {
+        if (mounted) setState(() => _noticeUpdateChecking = false);
+        return;
+      }
+
+      final remote = jsonDecode(response.body) as Map<String, dynamic>;
+      final remoteVersion = (remote['version'] as num).toInt();
+      final localVersion  = await AppStorage.loadNoticeVersion();
+
+      if (remoteVersion <= localVersion) {
+        // 이미 최신 버전
+        if (mounted) setState(() => _noticeUpdateChecking = false);
+        return;
+      }
+
+      // 최신 유의사항으로 갱신
+      final remoteSections = (remote['sections'] as List)
+          .map((s) => Map<String, dynamic>.from(s as Map))
+          .toList();
+
+      // items 리스트 내부도 Map<String,dynamic>으로 변환
+      for (final sec in remoteSections) {
+        sec['items'] = (sec['items'] as List)
+            .map((item) => Map<String, dynamic>.from(item as Map))
+            .toList();
+      }
+
+      await AppStorage.saveNoticeVersion(remoteVersion);
+
+      if (mounted) {
+        setState(() {
+          noticeSections         = remoteSections;
+          _noticeUpdateChecking  = false;
+          _noticeUpdated         = true;
+        });
+        // 갱신 완료 스낵바
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Row(children: [
+            const Icon(Icons.cloud_done, color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            Text('유의사항이 최신 버전(v$remoteVersion)으로 갱신되었습니다.'),
+          ]),
+          backgroundColor: Colors.teal.shade700,
+          duration: const Duration(seconds: 3),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ));
+        // 3초 후 갱신 표시 제거
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted) setState(() => _noticeUpdated = false);
+        });
+      }
+    } catch (_) {
+      // 인터넷 불량 또는 오류 시 조용히 무시
+      if (mounted) setState(() => _noticeUpdateChecking = false);
+    }
   }
 
   @override
@@ -1184,9 +1274,19 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
         Container(
           width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 6),
           decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Colors.white38, width: 1))),
-          child: Text(_noticeTitle, style: TextStyle(
-            color: Colors.white, fontSize: _noticeFontSize + 4, fontWeight: FontWeight.bold, letterSpacing: 1.5,
-          ), textAlign: TextAlign.center),
+          child: Stack(alignment: Alignment.center, children: [
+            Text(_noticeTitle, style: TextStyle(
+              color: Colors.white, fontSize: _noticeFontSize + 4, fontWeight: FontWeight.bold, letterSpacing: 1.5,
+            ), textAlign: TextAlign.center),
+            // 온라인 갱신 상태 표시
+            if (_noticeUpdateChecking)
+              Positioned(right: 4, child: SizedBox(
+                width: 14, height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.tealAccent.withValues(alpha: 0.8)),
+              ))
+            else if (_noticeUpdated)
+              const Positioned(right: 4, child: Icon(Icons.cloud_done, color: Colors.tealAccent, size: 16)),
+          ]),
         ),
         const SizedBox(height: 4),
         Expanded(child: SingleChildScrollView(child: Table(
