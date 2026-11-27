@@ -441,13 +441,14 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
   // ── 온라인 유의사항 갱신 ──
   // manual == true: 관리자가 새로고침 버튼으로 실행 (결과를 항상 알려주고 GitHub 캐시를 우회)
   // manual == false: 앱 시작 시 자동 확인 (실패하면 조용히 종료)
-  Future<void> _checkAndUpdateNotices({bool manual = false}) async {
+  // force == true: 버전 비교 없이 GitHub 의 현재 유의사항으로 덮어씀 (수동 수정 오류 복구용, manual 포함)
+  Future<void> _checkAndUpdateNotices({bool manual = false, bool force = false}) async {
     if (_noticeUpdateChecking) return; // 이미 확인 중이면 중복 실행 방지
     try {
       if (mounted) setState(() => _noticeUpdateChecking = true);
 
       var uri = Uri.parse(AppStorage.noticeRemoteUrl);
-      if (manual) {
+      if (manual || force) {
         // GitHub raw 는 5분간 캐시되므로 수동 새로고침은 매번 다른 주소로 요청
         uri = uri.replace(queryParameters: {'t': DateTime.now().millisecondsSinceEpoch.toString()});
       }
@@ -455,7 +456,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
 
       if (response.statusCode != 200) {
         if (mounted) setState(() => _noticeUpdateChecking = false);
-        if (manual) _showNoticeSnack('서버에서 유의사항을 가져오지 못했습니다. (오류 ${response.statusCode})', Colors.orange.shade800, Icons.cloud_off);
+        if (manual || force) _showNoticeSnack('서버에서 유의사항을 가져오지 못했습니다. (오류 ${response.statusCode})', Colors.orange.shade800, Icons.cloud_off);
         return;
       }
 
@@ -464,7 +465,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
       final localVersion  = await AppStorage.loadNoticeVersion();
 
       final hasSaved = await AppStorage.hasSavedNotices();
-      if (remoteVersion <= localVersion && hasSaved) {
+      if (!force && remoteVersion <= localVersion && hasSaved) {
         // 이미 최신 버전
         if (mounted) setState(() => _noticeUpdateChecking = false);
         if (manual) _showNoticeSnack('이미 최신 유의사항입니다. (v$localVersion)', Colors.blueGrey.shade700, Icons.check_circle);
@@ -491,7 +492,9 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
           _noticeUpdateChecking  = false;
           _noticeUpdated         = true;
         });
-        _showNoticeSnack('유의사항이 최신 버전(v$remoteVersion)으로 갱신되었습니다.', Colors.teal.shade700, Icons.cloud_done);
+        _showNoticeSnack(force
+            ? '유의사항을 GitHub 현재 버전(v$remoteVersion)으로 강제 재갱신했습니다.'
+            : '유의사항이 최신 버전(v$remoteVersion)으로 갱신되었습니다.', Colors.teal.shade700, Icons.cloud_done);
         // 3초 후 갱신 표시 제거
         Future.delayed(const Duration(seconds: 3), () {
           if (mounted) setState(() => _noticeUpdated = false);
@@ -500,8 +503,73 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
     } catch (_) {
       // 인터넷 불량 또는 오류: 기존 유의사항을 그대로 유지 (자동 확인은 조용히 무시)
       if (mounted) setState(() => _noticeUpdateChecking = false);
-      if (manual) _showNoticeSnack('인터넷 연결이 불안정하여 갱신하지 않았습니다. 기존 유의사항을 유지합니다.', Colors.orange.shade800, Icons.cloud_off);
+      if (manual || force) _showNoticeSnack('인터넷 연결이 불안정하거나 서버 데이터를 읽을 수 없어 갱신하지 않았습니다. 기존 유의사항을 유지합니다.', Colors.orange.shade800, Icons.cloud_off);
     }
+  }
+
+  // ── 유의사항 강제 재갱신 (관리자 비밀번호 필요) ──
+  Future<void> _forceRefreshNotices() async {
+    if (_noticeUpdateChecking) return;
+    final pwCtrl = TextEditingController();
+    String err = '';
+    final ok = await showDialog<bool>(
+      context: context, barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, ss) {
+        void submit() {
+          if (pwCtrl.text == AppDefaults.adminPassword) {
+            Navigator.pop(ctx, true);
+          } else {
+            ss(() => err = '비밀번호가 올바르지 않습니다.');
+            pwCtrl.clear();
+          }
+        }
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1A1A2E),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent), SizedBox(width: 8),
+            Text('유의사항 강제 재갱신', style: TextStyle(color: Colors.white, fontSize: 18)),
+          ]),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text(
+              '전자칠판에서 수정한 유의사항이 모두 사라지고\nGitHub에 저장된 현재 버전으로 덮어씁니다.\n계속하려면 관리자 비밀번호를 입력하세요.',
+              style: TextStyle(color: Colors.white70, fontSize: 13), textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            TextField(
+              controller: pwCtrl, autofocus: true,
+              obscureText: true, keyboardType: TextInputType.number, maxLength: 4,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white, fontSize: 28, letterSpacing: 12),
+              decoration: InputDecoration(
+                counterText: '',
+                hintText: '● ● ● ●', hintStyle: const TextStyle(color: Colors.white24, fontSize: 20),
+                enabledBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: err.isEmpty ? Colors.white30 : Colors.redAccent),
+                    borderRadius: BorderRadius.circular(12)),
+                focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: err.isEmpty ? Colors.orangeAccent : Colors.redAccent, width: 2),
+                    borderRadius: BorderRadius.circular(12)),
+                filled: true, fillColor: Colors.white10,
+              ),
+              onSubmitted: (_) => submit(),
+            ),
+            if (err.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8),
+              child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                const Icon(Icons.error_outline, color: Colors.redAccent, size: 16), const SizedBox(width: 4),
+                Text(err, style: const TextStyle(color: Colors.redAccent, fontSize: 13)),
+              ])),
+          ]),
+          actions: [
+            TextButton(onPressed: submit,
+                child: const Text('강제 재갱신', style: TextStyle(color: Colors.orangeAccent))),
+            TextButton(onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('취소', style: TextStyle(color: Colors.grey))),
+          ],
+        );
+      }),
+    );
+    pwCtrl.dispose();
+    if (ok == true) await _checkAndUpdateNotices(force: true);
   }
 
   void _showNoticeSnack(String msg, Color color, IconData icon) {
@@ -1351,26 +1419,49 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
                 child: CircularProgressIndicator(strokeWidth: 2, color: Colors.tealAccent.withValues(alpha: 0.8)),
               ))
             else if (_isAdminMode)
-              Positioned(right: 0, child: Tooltip(
-                message: '유의사항 새로고침 (온라인 갱신)',
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(16),
-                  onTap: () => _checkAndUpdateNotices(manual: true),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: Colors.teal.shade900,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.tealAccent.withValues(alpha: 0.5)),
+              Positioned(right: 0, child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Tooltip(
+                  message: '유의사항 새로고침 (온라인 갱신)',
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () => _checkAndUpdateNotices(manual: true),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.teal.shade900,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.tealAccent.withValues(alpha: 0.5)),
+                      ),
+                      child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.refresh, color: Colors.tealAccent, size: 16),
+                        SizedBox(width: 3),
+                        Text('새로고침', style: TextStyle(color: Colors.tealAccent, fontSize: 11)),
+                      ]),
                     ),
-                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.refresh, color: Colors.tealAccent, size: 16),
-                      SizedBox(width: 3),
-                      Text('새로고침', style: TextStyle(color: Colors.tealAccent, fontSize: 11)),
-                    ]),
                   ),
                 ),
-              ))
+                const SizedBox(width: 6),
+                Tooltip(
+                  message: 'GitHub 현재 버전으로 강제 재갱신 (비밀번호 필요)',
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: _forceRefreshNotices,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.deepOrange.shade900,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.orangeAccent.withValues(alpha: 0.5)),
+                      ),
+                      child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.restore, color: Colors.orangeAccent, size: 16),
+                        SizedBox(width: 3),
+                        Text('강제 재갱신', style: TextStyle(color: Colors.orangeAccent, fontSize: 11)),
+                      ]),
+                    ),
+                  ),
+                ),
+              ]))
             else if (_noticeUpdated)
               const Positioned(right: 4, child: Icon(Icons.cloud_done, color: Colors.tealAccent, size: 16)),
           ]),
