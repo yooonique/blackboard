@@ -439,17 +439,23 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
   }
 
   // ── 온라인 유의사항 갱신 ──
-  Future<void> _checkAndUpdateNotices() async {
-    // 네트워크 타임아웃 5초, 실패 시 조용히 종료
+  // manual == true: 관리자가 새로고침 버튼으로 실행 (결과를 항상 알려주고 GitHub 캐시를 우회)
+  // manual == false: 앱 시작 시 자동 확인 (실패하면 조용히 종료)
+  Future<void> _checkAndUpdateNotices({bool manual = false}) async {
+    if (_noticeUpdateChecking) return; // 이미 확인 중이면 중복 실행 방지
     try {
       if (mounted) setState(() => _noticeUpdateChecking = true);
 
-      final response = await http.get(
-        Uri.parse(AppStorage.noticeRemoteUrl),
-      ).timeout(const Duration(seconds: 5));
+      var uri = Uri.parse(AppStorage.noticeRemoteUrl);
+      if (manual) {
+        // GitHub raw 는 5분간 캐시되므로 수동 새로고침은 매번 다른 주소로 요청
+        uri = uri.replace(queryParameters: {'t': DateTime.now().millisecondsSinceEpoch.toString()});
+      }
+      final response = await http.get(uri).timeout(const Duration(seconds: 5));
 
       if (response.statusCode != 200) {
         if (mounted) setState(() => _noticeUpdateChecking = false);
+        if (manual) _showNoticeSnack('서버에서 유의사항을 가져오지 못했습니다. (오류 ${response.statusCode})', Colors.orange.shade800, Icons.cloud_off);
         return;
       }
 
@@ -461,6 +467,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
       if (remoteVersion <= localVersion && hasSaved) {
         // 이미 최신 버전
         if (mounted) setState(() => _noticeUpdateChecking = false);
+        if (manual) _showNoticeSnack('이미 최신 유의사항입니다. (v$localVersion)', Colors.blueGrey.shade700, Icons.check_circle);
         return;
       }
 
@@ -484,27 +491,33 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
           _noticeUpdateChecking  = false;
           _noticeUpdated         = true;
         });
-        // 갱신 완료 스낵바
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Row(children: [
-            const Icon(Icons.cloud_done, color: Colors.white, size: 18),
-            const SizedBox(width: 8),
-            Text('유의사항이 최신 버전(v$remoteVersion)으로 갱신되었습니다.'),
-          ]),
-          backgroundColor: Colors.teal.shade700,
-          duration: const Duration(seconds: 3),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ));
+        _showNoticeSnack('유의사항이 최신 버전(v$remoteVersion)으로 갱신되었습니다.', Colors.teal.shade700, Icons.cloud_done);
         // 3초 후 갱신 표시 제거
         Future.delayed(const Duration(seconds: 3), () {
           if (mounted) setState(() => _noticeUpdated = false);
         });
       }
     } catch (_) {
-      // 인터넷 불량 또는 오류 시 조용히 무시
+      // 인터넷 불량 또는 오류: 기존 유의사항을 그대로 유지 (자동 확인은 조용히 무시)
       if (mounted) setState(() => _noticeUpdateChecking = false);
+      if (manual) _showNoticeSnack('인터넷 연결이 불안정하여 갱신하지 않았습니다. 기존 유의사항을 유지합니다.', Colors.orange.shade800, Icons.cloud_off);
     }
+  }
+
+  void _showNoticeSnack(String msg, Color color, IconData icon) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Row(children: [
+        Icon(icon, color: Colors.white, size: 18),
+        const SizedBox(width: 8),
+        Expanded(child: Text(msg)),
+      ]),
+      backgroundColor: color,
+      duration: const Duration(seconds: 3),
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+    ));
   }
 
   @override
@@ -1331,11 +1344,32 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
             Text(_noticeTitle, style: TextStyle(
               color: Colors.white, fontSize: _noticeFontSize + 4, fontWeight: FontWeight.bold, letterSpacing: 1.5,
             ), textAlign: TextAlign.center),
-            // 온라인 갱신 상태 표시
+            // 온라인 갱신 상태 표시 / 관리자 모드 새로고침 버튼
             if (_noticeUpdateChecking)
-              Positioned(right: 4, child: SizedBox(
-                width: 14, height: 14,
+              Positioned(right: 6, child: SizedBox(
+                width: 18, height: 18,
                 child: CircularProgressIndicator(strokeWidth: 2, color: Colors.tealAccent.withValues(alpha: 0.8)),
+              ))
+            else if (_isAdminMode)
+              Positioned(right: 0, child: Tooltip(
+                message: '유의사항 새로고침 (온라인 갱신)',
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () => _checkAndUpdateNotices(manual: true),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.teal.shade900,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.tealAccent.withValues(alpha: 0.5)),
+                    ),
+                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.refresh, color: Colors.tealAccent, size: 16),
+                      SizedBox(width: 3),
+                      Text('새로고침', style: TextStyle(color: Colors.tealAccent, fontSize: 11)),
+                    ]),
+                  ),
+                ),
               ))
             else if (_noticeUpdated)
               const Positioned(right: 4, child: Icon(Icons.cloud_done, color: Colors.tealAccent, size: 16)),
