@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 7,
   "updated_at": "2026-11-27",
   "sections": [
     {
@@ -12,7 +12,7 @@
         },
         {
           "text": "1교시 시험 전에 모든 전자기기를 반드시 제출하세요.",
-          "color": "cyan",
+          "color": "red",
           "bold": true
         },
         {
