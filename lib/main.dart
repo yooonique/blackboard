@@ -16,7 +16,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '정기고사 시험 시간표',
+      title: '정기시험 시험 시간표',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: Colors.black,
@@ -32,21 +32,36 @@ class MyApp extends StatelessWidget {
 // ─────────────────────────────────────────────
 
 // 시험표 유형
-enum TableType { regular, mock } // regular=정기고사용, mock=모의고사용
+enum TableType { regular, mock } // regular=정기시험용, mock=모의고사용
 
-// 정기고사용 행: 교시 / 준비령 / 시간 / 과목
+// 정기시험용 행: 교시 / 예비령 / 준비령 / 본령 / 종료령 / 비고
+// isLunch == true 이면 점심시간 행 (예비령~종료령 열을 병합하여 span 텍스트 표시)
 class RegularPeriod {
-  String period;   // 교시 (예: 1교시)
-  String ready;    // 준비령 (예: 08:35)
-  String time;     // 시간 (예: 08:40 ~ 09:50)
-  String subject;  // 과목 (예: 국어)
-  RegularPeriod({required this.period, required this.ready, required this.time, required this.subject});
-  Map<String, dynamic> toJson() => {'period': period, 'ready': ready, 'time': time, 'subject': subject};
+  String period;   // 교시 (예: 1교시) / 점심시간 행에서는 '점심시간'
+  String early;    // 예비령
+  String ready;    // 준비령
+  String start;    // 본령
+  String end;      // 종료령
+  String note;     // 비고 (예: 50분)
+  bool isLunch;    // 점심시간 행 여부
+  String span;     // 점심시간 행의 병합 셀 텍스트 (예: 12:30 ~ 13:30)
+  RegularPeriod({
+    required this.period, this.early = '', this.ready = '', this.start = '',
+    this.end = '', this.note = '', this.isLunch = false, this.span = '',
+  });
+  Map<String, dynamic> toJson() => {
+    'period': period, 'early': early, 'ready': ready, 'start': start,
+    'end': end, 'note': note, 'isLunch': isLunch, 'span': span,
+  };
   factory RegularPeriod.fromJson(Map<String, dynamic> j) => RegularPeriod(
       period: (j['period'] ?? '') as String,
+      early:  (j['early']  ?? '') as String,
       ready:  (j['ready']  ?? '') as String,
-      time:   (j['time']   ?? '') as String,
-      subject:(j['subject'] ?? '') as String);
+      start:  (j['start']  ?? '') as String,
+      end:    (j['end']    ?? '') as String,
+      note:   (j['note']   ?? '') as String,
+      isLunch:(j['isLunch'] ?? false) as bool,
+      span:   (j['span']   ?? '') as String);
 }
 
 // 모의고사용 행: 교시 / 과목 / 준비령 / 본령 / 종료령
@@ -75,11 +90,12 @@ enum ExamType { regular, national }
 class AppDefaults {
   static const String adminPassword = '0000';
 
-  // ── 정기고사용 기본 시간표 ──
+  // ── 정기시험용 기본 시간표 ──
   static List<RegularPeriod> get regularPeriods => [
-    RegularPeriod(period: '1교시', ready: '08:50', time: '09:00 ~ 09:50', subject: '국  어'),
-    RegularPeriod(period: '2교시', ready: '10:00', time: '10:10 ~ 11:00', subject: '수  학'),
-    RegularPeriod(period: '3교시', ready: '11:10', time: '11:20 ~ 12:10', subject: '영  어'),
+    RegularPeriod(period: '1교시', early: '09:00', ready: '09:05', start: '09:10', end: '10:00', note: '50분'),
+    RegularPeriod(period: '2교시', early: '10:15', ready: '10:20', start: '10:25', end: '11:15', note: '50분'),
+    RegularPeriod(period: '3교시', early: '11:30', ready: '11:35', start: '11:40', end: '12:30', note: '50분'),
+    RegularPeriod(period: '점심시간', isLunch: true, span: '12:30 ~ 13:30', note: '60분'),
   ];
 
   // ── 모의고사용 기본 시간표 (HWPX 파일 기반) ──
@@ -137,7 +153,7 @@ class AppStorage {
   static const _kExamRound      = 'exam_round';
   static const _kExamCustomName = 'exam_custom_name';
   static const _kTableType      = 'table_type'; // 'regular' | 'mock'
-  static const _kRegularPeriods = 'regular_periods';
+  static const _kRegularPeriods = 'regular_periods_v2';
   static const _kMockPeriods    = 'mock_periods';
   static const _kNotices        = 'notice_sections';
   static const _kExamTitle      = 'exam_title';
@@ -147,11 +163,8 @@ class AppStorage {
   static const _kTableFontSz    = 'table_font_size';
   static const _kTableHdrFontSz = 'table_hdr_font_size';
   static const _kClockNumSz     = 'clock_num_size';
-  // 정기고사 열 너비
-  static const _kRColW1 = 'r_col_w1';
-  static const _kRColW2 = 'r_col_w2';
-  static const _kRColW3 = 'r_col_w3';
-  static const _kRColW4 = 'r_col_w4';
+  // 정기시험 열 너비
+  static const _kRColW = 'r2_col_w'; // 정기시험 6열 너비 (StringList)
   // 모의고사 열 너비
   static const _kMColW1 = 'm_col_w1';
   static const _kMColW2 = 'm_col_w2';
@@ -201,10 +214,7 @@ class AppStorage {
     await p.setDouble(_kTableFontSz,   d['tableCellFontSize']);
     await p.setDouble(_kTableHdrFontSz,d['tableHeaderFontSize']);
     await p.setDouble(_kClockNumSz,    d['clockNumberSize']);
-    await p.setDouble(_kRColW1,        d['rColW1']);
-    await p.setDouble(_kRColW2,        d['rColW2']);
-    await p.setDouble(_kRColW3,        d['rColW3']);
-    await p.setDouble(_kRColW4,        d['rColW4']);
+    await p.setStringList(_kRColW, (d['rColW'] as List<double>).map((e) => e.toString()).toList());
     await p.setDouble(_kMColW1,        d['mColW1']);
     await p.setDouble(_kMColW2,        d['mColW2']);
     await p.setDouble(_kMColW3,        d['mColW3']);
@@ -215,6 +225,13 @@ class AppStorage {
     await p.setDouble(_kDateFontSz,    d['dateFontSize']);
     await p.setString(_kClockType,     d['clockType']);
     await p.setInt   (_kBurnInInterval,d['burnInInterval']);
+  }
+
+  static const List<double> defaultRColW = [66.0, 76.0, 76.0, 76.0, 76.0, 60.0];
+  static List<double> _loadRColW(SharedPreferences p) {
+    final l = p.getStringList(_kRColW);
+    if (l == null || l.length != 6) return List<double>.from(defaultRColW);
+    return l.map((e) => double.tryParse(e) ?? 70.0).toList();
   }
 
   static Future<Map<String, dynamic>> loadAll() async {
@@ -236,7 +253,7 @@ class AppStorage {
     }
     final currentYear = DateTime.now().year;
     return {
-      'examName':            p.getString(_kExamName)       ?? '$currentYear학년도 1학기 1차 정기고사',
+      'examName':            p.getString(_kExamName)       ?? '$currentYear학년도 1학기 1차 정기시험',
       'examNameFontSize':    p.getDouble(_kExamNameFontSz) ?? 26.0,
       'examType':            p.getString(_kExamType)       ?? 'regular',
       'examYear':            p.getInt   (_kExamYear)       ?? currentYear,
@@ -255,10 +272,7 @@ class AppStorage {
       'tableCellFontSize':   p.getDouble(_kTableFontSz)    ?? 18.0,
       'tableHeaderFontSize': p.getDouble(_kTableHdrFontSz) ?? 18.0,
       'clockNumberSize':     p.getDouble(_kClockNumSz)     ?? 22.0,
-      'rColW1':              p.getDouble(_kRColW1)         ?? 70.0,
-      'rColW2':              p.getDouble(_kRColW2)         ?? 80.0,
-      'rColW3':              p.getDouble(_kRColW3)         ?? 180.0,
-      'rColW4':              p.getDouble(_kRColW4)         ?? 120.0,
+      'rColW':               _loadRColW(p),
       'mColW1':              p.getDouble(_kMColW1)         ?? 65.0,
       'mColW2':              p.getDouble(_kMColW2)         ?? 100.0,
       'mColW3':              p.getDouble(_kMColW3)         ?? 75.0,
@@ -332,7 +346,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
   }
 
   // ── 고사명 & 유형 ──
-  String examName = '2025학년도 1학기 1차 정기고사';
+  String examName = '2025학년도 1학기 1차 정기시험';
   double _examNameFontSize = 26.0;
   ExamType _examType = ExamType.regular;
   int _examYear     = DateTime.now().year;
@@ -343,7 +357,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
 
   String get _builtExamName {
     if (_examType == ExamType.regular) {
-      return '$_examYear학년도 ${_examSemester == 1 ? '1학기' : '2학기'} $_examRound차 정기고사';
+      return '$_examYear학년도 ${_examSemester == 1 ? '1학기' : '2학기'} $_examRound차 정기시험';
     } else {
       final extra = _examCustomName.isNotEmpty ? ' $_examCustomName' : '';
       return '$_examYear학년도 $_examMonth월 전국연합 학력평가$extra';
@@ -353,7 +367,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
   // ── 유의사항 패널 제목 (고사 유형에 따라 자동 변경) ──
   String get _noticeTitle {
     if (_examType == ExamType.national) return '전국연합 학력평가 관련 유의사항';
-    return '정기고사 관련 유의사항';
+    return '정기시험 관련 유의사항';
   }
 
   // ── 날짜 ──
@@ -384,8 +398,8 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
   double _tableHeaderFontSize = 18.0;
   double _tableCellFontSize   = 18.0;
   double _clockNumberSize     = 22.0;
-  // 정기고사 열 너비: 교시 / 준비령 / 시간 / 과목
-  double _rColW1 = 70.0, _rColW2 = 80.0, _rColW3 = 180.0, _rColW4 = 120.0;
+  // 정기시험 열 너비: 교시 / 준비령 / 시간 / 과목
+  List<double> _rColW = List<double>.from(AppStorage.defaultRColW);
   // 모의고사 열 너비: 교시 / 과목 / 준비령 / 본령 / 종료령
   double _mColW1 = 65.0, _mColW2 = 100.0, _mColW3 = 75.0, _mColW4 = 75.0, _mColW5 = 75.0;
   double _noticeRowHeight = 28.0;
@@ -500,7 +514,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
   Future<void> _loadData() async {
     final d = await AppStorage.loadAll();
     setState(() {
-      examName          = d['examName'] as String;
+      examName          = (d['examName'] as String).replaceAll('정기고사', '정기시험');
       _examNameFontSize = d['examNameFontSize'] as double;
       _examType         = (d['examType'] as String) == 'national' ? ExamType.national : ExamType.regular;
       _examYear         = d['examYear'] as int;
@@ -519,8 +533,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
       _tableCellFontSize   = d['tableCellFontSize'] as double;
       _tableHeaderFontSize = d['tableHeaderFontSize'] as double;
       _clockNumberSize  = d['clockNumberSize'] as double;
-      _rColW1 = d['rColW1'] as double; _rColW2 = d['rColW2'] as double;
-      _rColW3 = d['rColW3'] as double; _rColW4 = d['rColW4'] as double;
+      _rColW = List<double>.from(d['rColW'] as List<double>);
       _mColW1 = d['mColW1'] as double; _mColW2 = d['mColW2'] as double;
       _mColW3 = d['mColW3'] as double; _mColW4 = d['mColW4'] as double;
       _mColW5 = d['mColW5'] as double;
@@ -546,7 +559,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
       'isDateAutomatic': _isDateAutomatic, 'manualDateText': _manualDateText,
       'noticeFontSize': _noticeFontSize, 'tableCellFontSize': _tableCellFontSize,
       'tableHeaderFontSize': _tableHeaderFontSize, 'clockNumberSize': _clockNumberSize,
-      'rColW1': _rColW1, 'rColW2': _rColW2, 'rColW3': _rColW3, 'rColW4': _rColW4,
+      'rColW': _rColW,
       'mColW1': _mColW1, 'mColW2': _mColW2, 'mColW3': _mColW3, 'mColW4': _mColW4, 'mColW5': _mColW5,
       'noticeRowHeight': _noticeRowHeight, 'tableRowHeight': _tableRowHeight,
       'dateFontSize': _dateFontSize, 'clockType': _clockType,
@@ -688,7 +701,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
       builder: (ctx) => StatefulBuilder(builder: (ctx, ss) {
         String preview;
         if (tmpType == ExamType.regular) {
-          preview = '$tmpYear학년도 ${tmpSemester == 1 ? '1학기' : '2학기'} $tmpRound차 정기고사';
+          preview = '$tmpYear학년도 ${tmpSemester == 1 ? '1학기' : '2학기'} $tmpRound차 정기시험';
         } else {
           final extra = customCtrl.text.isNotEmpty ? ' ${customCtrl.text}' : '';
           preview = '$tmpYear학년도 $tmpMonth월 전국연합 학력평가$extra';
@@ -708,7 +721,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
                 value: tmpType, isExpanded: true, dropdownColor: const Color(0xFF1A1A2E),
                 underline: const SizedBox.shrink(), style: const TextStyle(color: Colors.white, fontSize: 16),
                 items: const [
-                  DropdownMenuItem(value: ExamType.regular,  child: Text('정기고사')),
+                  DropdownMenuItem(value: ExamType.regular,  child: Text('정기시험')),
                   DropdownMenuItem(value: ExamType.national, child: Text('전국연합 학력평가')),
                 ],
                 onChanged: (v) { if (v != null) ss(() => tmpType = v); },
@@ -799,7 +812,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
                 // ── 고사 유형 변경 시 시간표 자동 전환 ──
                 if (prevType != _examType) {
                   if (_examType == ExamType.regular) {
-                    _tableType = TableType.regular; // 정기고사 → 정기고사용 시간표
+                    _tableType = TableType.regular; // 정기시험 → 정기시험용 시간표
                   } else {
                     _tableType = TableType.mock;    // 전국연합 → 모의고사용 시간표
                   }
@@ -840,8 +853,8 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
           const Text('시험 유형에 따라 표 형식이 달라집니다.', style: TextStyle(color: Colors.white60, fontSize: 13)),
           const SizedBox(height: 16),
           _typeOptionCard(
-            icon: Icons.assignment, title: '정기고사용',
-            desc: '교시 / 준비령 / 시간 / 과목 (4열)',
+            icon: Icons.assignment, title: '정기시험용',
+            desc: '교시 / 예비령 / 준비령 / 본령 / 종료령 / 비고 + 점심시간 (6열)',
             selected: _tableType == TableType.regular,
             onTap: () { setState(() => _tableType = TableType.regular); Navigator.pop(ctx); },
           ),
@@ -952,23 +965,32 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
     ));
   }
 
-  // ── 정기고사 셀 편집 ──
+  // ── 정기시험 셀 편집 ──
   Future<void> _editRegularCell(int idx, String field) async {
     if (!_isAdminMode) return;
     final p = regularPeriods[idx];
-    final cur   = field == 'period' ? p.period : field == 'ready' ? p.ready : field == 'time' ? p.time : p.subject;
-    final title = field == 'period' ? '교시 수정' : field == 'ready' ? '준비령 수정 (예: 08:50)' : field == 'time' ? '시간 수정 (예: 09:00 ~ 09:50)' : '과목 수정';
+    String cur;
+    String title;
+    switch (field) {
+      case 'period': cur = p.period; title = p.isLunch ? '구분 수정' : '교시 수정'; break;
+      case 'early':  cur = p.early;  title = '예비령 수정 (예: 09:00)'; break;
+      case 'ready':  cur = p.ready;  title = '준비령 수정 (예: 09:05)'; break;
+      case 'start':  cur = p.start;  title = '본령 수정 (예: 09:10)'; break;
+      case 'end':    cur = p.end;    title = '종료령 수정 (예: 10:00)'; break;
+      case 'span':   cur = p.span;   title = '점심시간 수정 (예: 12:30 ~ 13:30)'; break;
+      default:       cur = p.note;   title = '비고 수정 (예: 50분)';
+    }
     final r = await _showEditDialog(context, cur, title: title);
     if (r != null) {
       setState(() {
-        if (field == 'period') {
-          regularPeriods[idx].period = r;
-        } else if (field == 'ready') {
-          regularPeriods[idx].ready = r;
-        } else if (field == 'time') {
-          regularPeriods[idx].time = r;
-        } else {
-          regularPeriods[idx].subject = r;
+        switch (field) {
+          case 'period': p.period = r; break;
+          case 'early':  p.early = r; break;
+          case 'ready':  p.ready = r; break;
+          case 'start':  p.start = r; break;
+          case 'end':    p.end = r; break;
+          case 'span':   p.span = r; break;
+          default:       p.note = r;
         }
       });
     }
@@ -998,8 +1020,25 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
     }
   }
 
-  void _addRegularRow()  { if (!_isAdminMode) return; setState(() => regularPeriods.add(RegularPeriod(period: '${regularPeriods.length+1}교시', ready: '00:00', time: '00:00 ~ 00:00', subject: '과목'))); }
-  void _removeRegularRow() { if (!_isAdminMode || regularPeriods.length <= 1) return; setState(() => regularPeriods.removeLast()); }
+  void _addRegularRow() {
+    if (!_isAdminMode) return;
+    setState(() {
+      final periodCount = regularPeriods.where((e) => !e.isLunch).length;
+      final row = RegularPeriod(period: '${periodCount + 1}교시', early: '00:00', ready: '00:00', start: '00:00', end: '00:00', note: '50분');
+      final lunchIdx = regularPeriods.indexWhere((e) => e.isLunch);
+      if (lunchIdx >= 0) {
+        regularPeriods.insert(lunchIdx, row);
+      } else {
+        regularPeriods.add(row);
+      }
+    });
+  }
+  void _removeRegularRow() {
+    if (!_isAdminMode) return;
+    final idx = regularPeriods.lastIndexWhere((e) => !e.isLunch);
+    if (idx < 0 || regularPeriods.where((e) => !e.isLunch).length <= 1) return;
+    setState(() => regularPeriods.removeAt(idx));
+  }
   void _addMockRow()    { if (!_isAdminMode) return; setState(() => mockPeriods.add(MockPeriod(period: '', subject: '과목', ready: '', start: '00:00', end: '00:00'))); }
   void _removeMockRow() { if (!_isAdminMode || mockPeriods.length <= 1) return; setState(() => mockPeriods.removeLast()); }
   void _addNoticeItem(int sIdx)    { if (!_isAdminMode) return; setState(() => (noticeSections[sIdx]['items'] as List).add({'text': '새 항목 (탭하여 수정)', 'color': 'white', 'bold': false})); }
@@ -1061,7 +1100,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
               _buildStatusBar(),
               Expanded(child: _examType == ExamType.national
                   ? _buildNationalLayout()   // 전국연합: 시계가 좌측 유의사항 위
-                  : _buildRegularLayout()),  // 정기고사: 시계가 우측 시간표 상단
+                  : _buildRegularLayout()),  // 정기시험: 시계가 우측 시간표 상단
               if (_isAdminMode) _buildControlBar(),
               _buildBottomBar(),
             ]),
@@ -1101,7 +1140,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
   }
 
   // ─────────────────────────────────────────────
-  // 레이아웃: 정기고사용 (시계 우측 시간표 상단)
+  // 레이아웃: 정기시험용 (시계 우측 시간표 상단)
   // ─────────────────────────────────────────────
   Widget _buildRegularLayout() {
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1142,7 +1181,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
   }
 
   // ─────────────────────────────────────────────
-  // 레이아웃: 전국연합용 (시계 우측 날짜 헤더 위 — 정기고사와 동일)
+  // 레이아웃: 전국연합용 (시계 우측 날짜 헤더 위 — 정기시험와 동일)
   // ─────────────────────────────────────────────
   Widget _buildNationalLayout() {
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1367,7 +1406,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
             Icon(_tableType == TableType.mock ? Icons.assessment : Icons.assignment,
                 color: _tableType == TableType.mock ? Colors.greenAccent : Colors.lightBlueAccent, size: 16),
             const SizedBox(width: 6),
-            Text(_tableType == TableType.mock ? '모의고사용 시간표' : '정기고사용 시간표',
+            Text(_tableType == TableType.mock ? '모의고사용 시간표' : '정기시험용 시간표',
               style: TextStyle(
                 color: _tableType == TableType.mock ? Colors.greenAccent : Colors.lightBlueAccent,
                 fontSize: 13, fontWeight: FontWeight.bold,
@@ -1395,29 +1434,71 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
     ]);
   }
 
-  // ── 정기고사 시간표: 교시 / 준비령 / 시간 / 과목 ──
+  // ── 정기시험 시간표: 교시 / 예비령 / 준비령 / 본령 / 종료령 / 비고 (+ 점심시간 병합 행) ──
   Widget _buildRegularTable() {
-    return Table(
-      border: TableBorder.all(color: Colors.white, width: 1.5),
-      columnWidths: {
-        0: FixedColumnWidth(_rColW1), 1: FixedColumnWidth(_rColW2),
-        2: FixedColumnWidth(_rColW3), 3: FixedColumnWidth(_rColW4),
-      },
-      children: [
+    return LayoutBuilder(builder: (context, cons) {
+      final total = _rColW.fold<double>(0, (a, b) => a + b);
+      final k = cons.maxWidth.isFinite ? cons.maxWidth / total : 1.0;
+      final w = _rColW.map((e) => e * k).toList();
+      const side = BorderSide(color: Colors.white, width: 1.5);
+
+      final children = <Widget>[];
+      bool first = true;
+      List<TableRow> pending = [
         TableRow(decoration: const BoxDecoration(color: Color(0xFF1A1A2E)), children: [
-          _hdrCell('교  시'), _hdrCell('준비령'), _hdrCell('시  간'), _hdrCell('과  목'),
+          _hdrCell('교  시'), _hdrCell('예비령'), _hdrCell('준비령'), _hdrCell('본  령'), _hdrCell('종료령'), _hdrCell('비  고'),
         ]),
-        ...List.generate(regularPeriods.length, (i) {
-          final p = regularPeriods[i];
-          return TableRow(children: [
-            _editCell(p.period,  () => _editRegularCell(i, 'period')),
-            _editCell(p.ready,   () => _editRegularCell(i, 'ready')),
-            _editCell(p.time,    () => _editRegularCell(i, 'time')),
-            _editCell(p.subject, () => _editRegularCell(i, 'subject')),
-          ]);
-        }),
-      ],
-    );
+      ];
+
+      TableBorder border() => first
+          ? TableBorder.all(color: Colors.white, width: 1.5)
+          : const TableBorder(left: side, right: side, bottom: side, horizontalInside: side, verticalInside: side);
+
+      void flush() {
+        if (pending.isEmpty) return;
+        children.add(Table(
+          border: border(),
+          columnWidths: {for (int i = 0; i < 6; i++) i: FixedColumnWidth(w[i])},
+          children: pending,
+        ));
+        pending = [];
+        first = false;
+      }
+
+      for (int i = 0; i < regularPeriods.length; i++) {
+        final p = regularPeriods[i];
+        if (p.isLunch) {
+          flush();
+          children.add(Table(
+            border: border(),
+            columnWidths: {
+              0: FixedColumnWidth(w[0]),
+              1: FixedColumnWidth(w[1] + w[2] + w[3] + w[4]),
+              2: FixedColumnWidth(w[5]),
+            },
+            children: [
+              TableRow(children: [
+                _editCell(p.period, () => _editRegularCell(i, 'period'), bold: true),
+                _editCell(p.span,   () => _editRegularCell(i, 'span')),
+                _editCell(p.note,   () => _editRegularCell(i, 'note')),
+              ]),
+            ],
+          ));
+          first = false;
+        } else {
+          pending.add(TableRow(children: [
+            _editCell(p.period, () => _editRegularCell(i, 'period'), bold: true),
+            _editCell(p.early,  () => _editRegularCell(i, 'early')),
+            _editCell(p.ready,  () => _editRegularCell(i, 'ready')),
+            _editCell(p.start,  () => _editRegularCell(i, 'start')),
+            _editCell(p.end,    () => _editRegularCell(i, 'end')),
+            _editCell(p.note,   () => _editRegularCell(i, 'note')),
+          ]));
+        }
+      }
+      flush();
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children);
+    });
   }
 
   // ── 모의고사 시간표: 교시 / 과목 / 준비령 / 본령 / 종료령 ──
@@ -1452,9 +1533,9 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
     child: Text(t, style: TextStyle(color: Colors.white, fontSize: _tableHeaderFontSize, fontWeight: FontWeight.bold),
         textAlign: TextAlign.center));
 
-  Widget _editCell(String t, VoidCallback onTap) => GestureDetector(onTap: onTap,
+  Widget _editCell(String t, VoidCallback onTap, {bool bold = false}) => GestureDetector(onTap: onTap,
     child: Container(height: _tableRowHeight, alignment: Alignment.center,
-      child: Text(t, style: TextStyle(color: Colors.white, fontSize: _tableCellFontSize, fontWeight: FontWeight.w500),
+      child: Text(t, style: TextStyle(color: Colors.white, fontSize: _tableCellFontSize, fontWeight: bold ? FontWeight.bold : FontWeight.w500),
           textAlign: TextAlign.center)));
 
   // ── 조절 버튼 바 (관리자 모드) ──
@@ -1493,10 +1574,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
           _d(),
           // 열 너비 조절 (현재 유형에 따라)
           if (!isMock) ...[
-            _cg('교시폭', [_cb(Icons.add, () => setState(()=>_rColW1+=8)), _cb(Icons.remove, () => setState((){if(_rColW1>30)_rColW1-=8;}))]), _d(),
-            _cg('준비령폭', [_cb(Icons.add, () => setState(()=>_rColW2+=8)), _cb(Icons.remove, () => setState((){if(_rColW2>40)_rColW2-=8;}))]), _d(),
-            _cg('시간폭', [_cb(Icons.add, () => setState(()=>_rColW3+=8)), _cb(Icons.remove, () => setState((){if(_rColW3>60)_rColW3-=8;}))]), _d(),
-            _cg('과목폭', [_cb(Icons.add, () => setState(()=>_rColW4+=8)), _cb(Icons.remove, () => setState((){if(_rColW4>40)_rColW4-=8;}))]), _d(),
+            ..._regularColControls(),
           ] else ...[
             _cg('교시폭', [_cb(Icons.add, () => setState(()=>_mColW1+=8)), _cb(Icons.remove, () => setState((){if(_mColW1>30)_mColW1-=8;}))]), _d(),
             _cg('과목폭', [_cb(Icons.add, () => setState(()=>_mColW2+=8)), _cb(Icons.remove, () => setState((){if(_mColW2>40)_mColW2-=8;}))]), _d(),
@@ -1550,7 +1628,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
             ),
           ]),
           _d(),
-          _cg(!isMock ? '정기고사 행' : '모의고사 행', [
+          _cg(!isMock ? '정기시험 행' : '모의고사 행', [
             _cb(Icons.add,    !isMock ? _addRegularRow : _addMockRow),
             _cb(Icons.remove, !isMock ? _removeRegularRow : _removeMockRow),
           ]),
@@ -1606,6 +1684,19 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
         ],
       ]),
     );
+  }
+
+  List<Widget> _regularColControls() {
+    const labels = ['교시폭', '예비령폭', '준비령폭', '본령폭', '종료령폭', '비고폭'];
+    return [
+      for (int i = 0; i < 6; i++) ...[
+        _cg(labels[i], [
+          _cb(Icons.add, () => setState(() => _rColW[i] += 8)),
+          _cb(Icons.remove, () => setState(() { if (_rColW[i] > 30) _rColW[i] -= 8; })),
+        ]),
+        _d(),
+      ],
+    ];
   }
 
   Widget _cg(String label, List<Widget> btns) => Padding(

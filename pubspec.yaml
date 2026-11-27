@@ -1,5 +1,5 @@
 name: exam_board_scheduler
-description: "전자칠판용 고등학교 지필평가 시험 시간표 앱"
+description: "전자칠판용 고등학교 정기시험 시간표 앱"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
