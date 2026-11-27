@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "updated_at": "2026-11-27",
   "sections": [
     {
@@ -22,11 +22,6 @@
         },
         {
           "text": "단추가 있는 옷은 안내에 따라 스티커를 붙이세요. 담요·귀마개·방석은 사용 전에 확인받으세요.",
-          "color": "white",
-          "bold": false
-        },
-        {
-          "text": "글씨가 없는 음료수 용기는 책상 아래에 두세요.",
           "color": "white",
           "bold": false
         },
