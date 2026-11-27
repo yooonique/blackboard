@@ -188,6 +188,19 @@ class AppStorage {
     return p.getInt(_kNoticeVersion) ?? 0;
   }
 
+  // 저장된 유의사항(수동 저장 또는 온라인 갱신)이 있는지
+  static Future<bool> hasSavedNotices() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getString(_kNotices) != null;
+  }
+
+  // 온라인 갱신 결과를 유의사항 내용과 버전을 함께 저장
+  static Future<void> saveNoticesWithVersion(List<Map<String, dynamic>> sections, int v) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kNotices, jsonEncode(sections));
+    await p.setInt(_kNoticeVersion, v);
+  }
+
   static Future<void> saveNoticeVersion(int v) async {
     final p = await SharedPreferences.getInstance();
     await p.setInt(_kNoticeVersion, v);
@@ -444,7 +457,8 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
       final remoteVersion = (remote['version'] as num).toInt();
       final localVersion  = await AppStorage.loadNoticeVersion();
 
-      if (remoteVersion <= localVersion) {
+      final hasSaved = await AppStorage.hasSavedNotices();
+      if (remoteVersion <= localVersion && hasSaved) {
         // 이미 최신 버전
         if (mounted) setState(() => _noticeUpdateChecking = false);
         return;
@@ -462,7 +476,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
             .toList();
       }
 
-      await AppStorage.saveNoticeVersion(remoteVersion);
+      await AppStorage.saveNoticesWithVersion(remoteSections, remoteVersion);
 
       if (mounted) {
         setState(() {
