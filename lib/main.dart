@@ -34,32 +34,32 @@ class MyApp extends StatelessWidget {
 // 시험표 유형
 enum TableType { regular, mock } // regular=정기시험용, mock=모의고사용
 
-// 정기시험용 행: 교시 / 예비령 / 준비령 / 본령 / 종료령 / 비고
-// isLunch == true 이면 점심시간 행 (예비령~종료령 열을 병합하여 span 텍스트 표시)
+// 정기시험용 행: 교시 / 과목명 / 예비령 / 준비령 / 본령 / 종료령
+// isLunch == true 이면 점심시간 행 (과목명~종료령 열을 병합하여 span 텍스트 표시)
 class RegularPeriod {
   String period;   // 교시 (예: 1교시) / 점심시간 행에서는 '점심시간'
+  String subject;  // 과목명 (예: 국어)
   String early;    // 예비령
   String ready;    // 준비령
   String start;    // 본령
   String end;      // 종료령
-  String note;     // 비고 (예: 50분)
   bool isLunch;    // 점심시간 행 여부
   String span;     // 점심시간 행의 병합 셀 텍스트 (예: 12:30 ~ 13:30)
   RegularPeriod({
-    required this.period, this.early = '', this.ready = '', this.start = '',
-    this.end = '', this.note = '', this.isLunch = false, this.span = '',
+    required this.period, this.subject = '', this.early = '', this.ready = '', this.start = '',
+    this.end = '', this.isLunch = false, this.span = '',
   });
   Map<String, dynamic> toJson() => {
-    'period': period, 'early': early, 'ready': ready, 'start': start,
-    'end': end, 'note': note, 'isLunch': isLunch, 'span': span,
+    'period': period, 'subject': subject, 'early': early, 'ready': ready, 'start': start,
+    'end': end, 'isLunch': isLunch, 'span': span,
   };
   factory RegularPeriod.fromJson(Map<String, dynamic> j) => RegularPeriod(
       period: (j['period'] ?? '') as String,
+      subject:(j['subject'] ?? '') as String,
       early:  (j['early']  ?? '') as String,
       ready:  (j['ready']  ?? '') as String,
       start:  (j['start']  ?? '') as String,
       end:    (j['end']    ?? '') as String,
-      note:   (j['note']   ?? '') as String,
       isLunch:(j['isLunch'] ?? false) as bool,
       span:   (j['span']   ?? '') as String);
 }
@@ -92,10 +92,10 @@ class AppDefaults {
 
   // ── 정기시험용 기본 시간표 ──
   static List<RegularPeriod> get regularPeriods => [
-    RegularPeriod(period: '1교시', early: '09:00', ready: '09:05', start: '09:10', end: '10:00', note: '50분'),
-    RegularPeriod(period: '2교시', early: '10:15', ready: '10:20', start: '10:25', end: '11:15', note: '50분'),
-    RegularPeriod(period: '3교시', early: '11:30', ready: '11:35', start: '11:40', end: '12:30', note: '50분'),
-    RegularPeriod(period: '점심시간', isLunch: true, span: '12:30 ~ 13:30', note: '60분'),
+    RegularPeriod(period: '1교시', subject: '국  어', early: '09:00', ready: '09:05', start: '09:10', end: '10:00'),
+    RegularPeriod(period: '2교시', subject: '수  학', early: '10:15', ready: '10:20', start: '10:25', end: '11:15'),
+    RegularPeriod(period: '3교시', subject: '영  어', early: '11:30', ready: '11:35', start: '11:40', end: '12:30'),
+    RegularPeriod(period: '점심시간', isLunch: true, span: '12:30 ~ 13:30'),
   ];
 
   // ── 모의고사용 기본 시간표 (HWPX 파일 기반) ──
@@ -153,7 +153,7 @@ class AppStorage {
   static const _kExamRound      = 'exam_round';
   static const _kExamCustomName = 'exam_custom_name';
   static const _kTableType      = 'table_type'; // 'regular' | 'mock'
-  static const _kRegularPeriods = 'regular_periods_v2';
+  static const _kRegularPeriods = 'regular_periods_v3';
   static const _kMockPeriods    = 'mock_periods';
   static const _kNotices        = 'notice_sections';
   static const _kExamTitle      = 'exam_title';
@@ -164,7 +164,7 @@ class AppStorage {
   static const _kTableHdrFontSz = 'table_hdr_font_size';
   static const _kClockNumSz     = 'clock_num_size';
   // 정기시험 열 너비
-  static const _kRColW = 'r2_col_w'; // 정기시험 6열 너비 (StringList)
+  static const _kRColW = 'r4_col_w'; // 정기시험 6열(교시/과목명/예비령/준비령/본령/종료령) 너비
   // 모의고사 열 너비
   static const _kMColW1 = 'm_col_w1';
   static const _kMColW2 = 'm_col_w2';
@@ -240,7 +240,7 @@ class AppStorage {
     await p.setInt   (_kBurnInInterval,d['burnInInterval']);
   }
 
-  static const List<double> defaultRColW = [66.0, 76.0, 76.0, 76.0, 76.0, 60.0];
+  static const List<double> defaultRColW = [66.0, 90.0, 76.0, 76.0, 76.0, 76.0];
   static List<double> _loadRColW(SharedPreferences p) {
     final l = p.getStringList(_kRColW);
     if (l == null || l.length != 6) return List<double>.from(defaultRColW);
@@ -881,7 +881,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
           const SizedBox(height: 16),
           _typeOptionCard(
             icon: Icons.assignment, title: '정기시험용',
-            desc: '교시 / 예비령 / 준비령 / 본령 / 종료령 / 비고 + 점심시간 (6열)',
+            desc: '교시 / 과목명 / 예비령 / 준비령 / 본령 / 종료령 + 점심시간 (6열)',
             selected: _tableType == TableType.regular,
             onTap: () { setState(() => _tableType = TableType.regular); Navigator.pop(ctx); },
           ),
@@ -1000,24 +1000,24 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
     String title;
     switch (field) {
       case 'period': cur = p.period; title = p.isLunch ? '구분 수정' : '교시 수정'; break;
+      case 'subject':cur = p.subject;title = '과목명 수정 (예: 국어)'; break;
       case 'early':  cur = p.early;  title = '예비령 수정 (예: 09:00)'; break;
       case 'ready':  cur = p.ready;  title = '준비령 수정 (예: 09:05)'; break;
       case 'start':  cur = p.start;  title = '본령 수정 (예: 09:10)'; break;
-      case 'end':    cur = p.end;    title = '종료령 수정 (예: 10:00)'; break;
       case 'span':   cur = p.span;   title = '점심시간 수정 (예: 12:30 ~ 13:30)'; break;
-      default:       cur = p.note;   title = '비고 수정 (예: 50분)';
+      default:       cur = p.end;    title = '종료령 수정 (예: 10:00)';
     }
     final r = await _showEditDialog(context, cur, title: title);
     if (r != null) {
       setState(() {
         switch (field) {
           case 'period': p.period = r; break;
+          case 'subject':p.subject = r; break;
           case 'early':  p.early = r; break;
           case 'ready':  p.ready = r; break;
           case 'start':  p.start = r; break;
-          case 'end':    p.end = r; break;
           case 'span':   p.span = r; break;
-          default:       p.note = r;
+          default:       p.end = r;
         }
       });
     }
@@ -1051,7 +1051,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
     if (!_isAdminMode) return;
     setState(() {
       final periodCount = regularPeriods.where((e) => !e.isLunch).length;
-      final row = RegularPeriod(period: '${periodCount + 1}교시', early: '00:00', ready: '00:00', start: '00:00', end: '00:00', note: '50분');
+      final row = RegularPeriod(period: '${periodCount + 1}교시', subject: '과목', early: '00:00', ready: '00:00', start: '00:00', end: '00:00');
       final lunchIdx = regularPeriods.indexWhere((e) => e.isLunch);
       if (lunchIdx >= 0) {
         regularPeriods.insert(lunchIdx, row);
@@ -1482,7 +1482,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
     ]);
   }
 
-  // ── 정기시험 시간표: 교시 / 예비령 / 준비령 / 본령 / 종료령 / 비고 (+ 점심시간 병합 행) ──
+  // ── 정기시험 시간표: 교시 / 과목명 / 예비령 / 준비령 / 본령 / 종료령 (+ 점심시간 병합 행) ──
   Widget _buildRegularTable() {
     return LayoutBuilder(builder: (context, cons) {
       final total = _rColW.fold<double>(0, (a, b) => a + b);
@@ -1494,7 +1494,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
       bool first = true;
       List<TableRow> pending = [
         TableRow(decoration: const BoxDecoration(color: Color(0xFF1A1A2E)), children: [
-          _hdrCell('교  시'), _hdrCell('예비령'), _hdrCell('준비령'), _hdrCell('본  령'), _hdrCell('종료령'), _hdrCell('비  고'),
+          _hdrCell('교  시'), _hdrCell('과목명'), _hdrCell('예비령'), _hdrCell('준비령'), _hdrCell('본  령'), _hdrCell('종료령'),
         ]),
       ];
 
@@ -1521,14 +1521,12 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
             border: border(),
             columnWidths: {
               0: FixedColumnWidth(w[0]),
-              1: FixedColumnWidth(w[1] + w[2] + w[3] + w[4]),
-              2: FixedColumnWidth(w[5]),
+              1: FixedColumnWidth(w[1] + w[2] + w[3] + w[4] + w[5]),
             },
             children: [
               TableRow(children: [
                 _editCell(p.period, () => _editRegularCell(i, 'period'), bold: true),
                 _editCell(p.span,   () => _editRegularCell(i, 'span')),
-                _editCell(p.note,   () => _editRegularCell(i, 'note')),
               ]),
             ],
           ));
@@ -1536,11 +1534,11 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
         } else {
           pending.add(TableRow(children: [
             _editCell(p.period, () => _editRegularCell(i, 'period'), bold: true),
+            _editCell(p.subject,() => _editRegularCell(i, 'subject')),
             _editCell(p.early,  () => _editRegularCell(i, 'early')),
             _editCell(p.ready,  () => _editRegularCell(i, 'ready')),
             _editCell(p.start,  () => _editRegularCell(i, 'start')),
             _editCell(p.end,    () => _editRegularCell(i, 'end')),
-            _editCell(p.note,   () => _editRegularCell(i, 'note')),
           ]));
         }
       }
@@ -1581,7 +1579,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
     child: Text(t, style: TextStyle(color: Colors.white, fontSize: _tableHeaderFontSize, fontWeight: FontWeight.bold),
         textAlign: TextAlign.center));
 
-  Widget _editCell(String t, VoidCallback onTap, {bool bold = false}) => GestureDetector(onTap: onTap,
+  Widget _editCell(String t, VoidCallback onTap, {bool bold = false}) => GestureDetector(onTap: onTap, behavior: HitTestBehavior.opaque,
     child: Container(height: _tableRowHeight, alignment: Alignment.center,
       child: Text(t, style: TextStyle(color: Colors.white, fontSize: _tableCellFontSize, fontWeight: bold ? FontWeight.bold : FontWeight.w500),
           textAlign: TextAlign.center)));
@@ -1735,7 +1733,7 @@ class _ExamBoardScreenState extends State<ExamBoardScreen> with WidgetsBindingOb
   }
 
   List<Widget> _regularColControls() {
-    const labels = ['교시폭', '예비령폭', '준비령폭', '본령폭', '종료령폭', '비고폭'];
+    const labels = ['교시폭', '과목명폭', '예비령폭', '준비령폭', '본령폭', '종료령폭'];
     return [
       for (int i = 0; i < 6; i++) ...[
         _cg(labels[i], [
